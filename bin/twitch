@@ -11,6 +11,20 @@ abort "Error: Please supply a broadcaster. Usage: twitch {live,vod} BROADCASTER"
 mode = ARGV[0]
 broadcaster = ARGV[1].downcase
 
+def api(raw_uri, error_msg)
+  client_id = 'jzkbprff40iqj646a697cyrvl0zt2m6'
+
+  uri = URI.parse(raw_uri)
+
+  begin
+    uri.open({
+      'Client-ID' => client_id
+    }).read
+  rescue OpenURI::HTTPError
+    abort error_msg
+  end
+end
+
 def get_token(type, opts) 
   if type == 'live'
     token_url = "https://api.twitch.tv/api/channels/#{opts["broadcaster"]}/access_token?on_site=1"
@@ -18,12 +32,8 @@ def get_token(type, opts)
     token_url = "https://api.twitch.tv/api/vods/#{opts["video_id"]}/access_token?on_site=1"
   end
 
-  begin
-    raw_token = URI.parse(token_url).read
-    token = JSON.parse(raw_token)
-  rescue OpenURI::HTTPError
-    abort "Error: Unable to retrieve token"
-  end
+  raw_token = api(token_url, "Error: Unable to retrieve token")
+  token = JSON.parse(raw_token)
 
   raise "Error: #{token["message"]}" if token["error"]
 
@@ -37,13 +47,12 @@ def get_stream_url(type, token, opts)
     streams_url = "http://usher.justin.tv/vod/#{opts["video_id"]}?nauth=#{URI.escape(token["token"])}&nauthsig=#{URI.escape(token["sig"])}"
   end
 
-  streams = Net::HTTP.get_response(URI(streams_url))
-  abort "Error: Stream is not live" if streams.is_a? Net::HTTPNotFound
+  streams = api(streams_url, "Error: Stream is not live")
 
   stream_info = {}
   current_stream = ''
 
-  streams.body.split("\n").each do |line| 
+  streams.split("\n").each do |line| 
     # Stream information
     if line.start_with? "#EXT-X-STREAM-INF:"
       _hash = {}
@@ -68,17 +77,16 @@ def get_stream_url(type, token, opts)
     end
   end
 
-  puts stream_info
   if stream_info['"chunked"']
-    puts "Quality: chunked"
+    puts "Playing quality: chunked @ #{stream_info[current_stream]["bandwidth"]}"
     stream_info['"chunked"']["url"]
   elsif stream_info['"high"']
-    puts "Quality: high"
+    puts "Playing quality: high @ #{stream_info[current_stream]["bandwidth"]}"
     stream_info['"high"']["url"]
   else
     # Just choose one
     key, val = stream_info.first
-    puts "Quality: #{key}"
+    puts "Playing quality: #{key} @ #{stream_info[current_stream]["bandwidth"]}"
     val["url"]
   end
 end
@@ -92,12 +100,7 @@ if mode == 'live'
   stream_url = get_stream_url('live', token, { "broadcaster" => broadcaster })
   watch stream_url
 elsif mode === 'vod'
-  begin
-    videos = URI.parse("https://api.twitch.tv/kraken/channels/#{broadcaster}/videos?broadcasts=true").read
-  rescue OpenURI::HTTPError
-    abort "Error: Broadcaster does not exist"
-  end
-
+  videos = api("https://api.twitch.tv/kraken/channels/#{broadcaster}/videos?broadcasts=true", "Error: Broadcaster does not exist")
   videos_list = JSON.parse(videos)
 
   abort "Error: Broadcaster has no saved broadcasts" if videos_list["videos"].length == 0
