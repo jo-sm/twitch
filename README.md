@@ -10,7 +10,7 @@ You will need to download the source using git, build it into a gem, and install
 > git clone https://github.com/jo-sm/twitch
 > cd twitch
 > gem build twitch.gemspec
-> gem install twitch-<VERSION>.gem
+> gem install twitch-0.0.3.gem
 ```
 
 ## Usage
@@ -23,6 +23,37 @@ You can run the global `twitch` command from the command line, which takes two a
 ```
 
 When choosing the `vod` option, you will be presented with the 10 latest VODs, with which you can choose by number and watch like you would a live stream.
+
+## Tab Completion
+
+If you'd like to enable tab completion for the keywords (vod, live) and the broadcasters you've previously watched, put the following in your `~/.bash_profile`:
+
+```
+_twitch_tab_complete() {
+  COMPREPLY=()
+  completions=()
+
+  local current_word="${COMP_WORDS[COMP_CWORD]}"
+  local previous_word="${COMP_WORDS[COMP_CWORD-1]}"
+  local words_length="${#COMP_WORDS[@]}"
+
+  if [[ "$previous_word" =~ ^(live|vod)$ ]]; then
+    if [ -s ~/.twitch/broadcaster_cache ]; then
+      completions=( $(ruby -e "require 'json'; puts JSON.load(open(File.join(Dir.home, '.twitch', 'broadcaster_cache'), 'r').read).join ' '") )
+    fi
+  elif [ "3" -gt "${words_length}" ]; then
+    if [[ "$current_word" == l* ]]; then
+      completions=("live")
+    elif [[ "$current_word" == v* ]]; then
+      completions=("vod")
+    fi
+  fi
+
+  COMPREPLY=( $(compgen -W "$completions" -- "$word") )
+}
+
+complete -F _twitch_tab_complete twitch
+```
 
 ## Notes
 
