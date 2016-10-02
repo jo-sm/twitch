@@ -8,7 +8,7 @@ Gem::Specification.new do |spec|
   spec.version       = Twitch::VERSION
   spec.authors       = ["Joshua Smock"]
 
-  spec.summary       = %q{Watch Twitch streams or vods locally using Quicktime}
+  spec.summary       = %q{Watch Twitch streams or vods locally on your Mac using Quicktime}
   spec.homepage      = "https://github.com/jo-sm/twitch"
   spec.license       = "MIT"
 
