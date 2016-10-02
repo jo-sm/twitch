@@ -4,6 +4,7 @@ require 'net/http'
 require 'uri'
 require 'json'
 require 'open-uri'
+require 'fileutils'
 
 abort "Error: Please supply a mode. Usage: twitch {live,vod} BROADCASTER" if !ARGV[0]
 abort "Error: Please supply a broadcaster. Usage: twitch {live,vod} BROADCASTER" if !ARGV[1]
@@ -95,9 +96,39 @@ def watch(url)
   `open -a "QuickTime Player" "#{url}"`
 end
 
+def add_to_broadcasters_cache(broadcaster)
+  config_home = File.join(Dir.home, ".twitch")
+  broadcaster_cache_file = File.join(config_home, "broadcaster_cache")
+
+  begin
+    Dir.mkdir(config_home, 0755)
+  rescue Errno::EEXIST
+  end
+
+  FileUtils.touch(broadcaster_cache_file)
+
+  cache_file = open(broadcaster_cache_file, 'w+')
+  cache = cache_file.read
+
+  begin
+    cache = JSON.parse(cache)
+  rescue JSON::ParserError
+    cache = []
+  end
+
+  cache << broadcaster
+
+  cache.uniq!
+
+  JSON.dump(cache, cache_file)
+
+  cache_file.close
+end
+
 if mode == 'live'
   token = get_token('live', { "broadcaster" => broadcaster })
   stream_url = get_stream_url('live', token, { "broadcaster" => broadcaster })
+  add_to_broadcasters_cache broadcaster
   watch stream_url
 elsif mode === 'vod'
   videos = api("https://api.twitch.tv/kraken/channels/#{broadcaster}/videos?broadcasts=true", "Error: Broadcaster does not exist")
@@ -122,6 +153,8 @@ elsif mode === 'vod'
   video_id = videos_list["videos"][index-1]["_id"][1..-1]
   token = get_token('vod', { "video_id" => video_id })
   stream_url = get_stream_url('vod', token, { "video_id" => video_id })
+
+  add_to_broadcasters_cache broadcaster
 
   watch stream_url
 else
