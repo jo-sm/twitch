@@ -107,8 +107,9 @@ def add_to_broadcasters_cache(broadcaster)
 
   FileUtils.touch(broadcaster_cache_file)
 
-  cache_file = open(broadcaster_cache_file, 'w+')
+  cache_file = open(broadcaster_cache_file, 'r')
   cache = cache_file.read
+  cache_file.close
 
   begin
     cache = JSON.parse(cache)
@@ -120,8 +121,8 @@ def add_to_broadcasters_cache(broadcaster)
 
   cache.uniq!
 
+  cache_file = open(broadcaster_cache_file, 'w')
   JSON.dump(cache, cache_file)
-
   cache_file.close
 end
 
