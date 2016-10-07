@@ -10,7 +10,7 @@ You will need to download the source using git, build it into a gem, and install
 > git clone https://github.com/jo-sm/twitch
 > cd twitch
 > gem build twitch.gemspec
-> gem install twitch-0.0.3.gem
+> gem install twitch-0.0.4.gem
 ```
 
 ## Usage
@@ -39,7 +39,7 @@ _twitch_tab_complete() {
 
   if [[ "$previous_word" =~ ^(live|vod)$ ]]; then
     if [ -s ~/.twitch/broadcaster_cache ]; then
-      completions=( $(ruby -e "require 'json'; puts JSON.load(open(File.join(Dir.home, '.twitch', 'broadcaster_cache'), 'r').read).join ' '") )
+      completions=( $(ruby -e "require 'json'; puts JSON.load(open(File.join(Dir.home, '.twitch', 'broadcaster_cache'), 'r').read).select{|i| i.match('${current_word}')}.join ' '") )
     fi
   elif [ "3" -gt "${words_length}" ]; then
     if [[ "$current_word" == l* ]]; then
