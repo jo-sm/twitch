@@ -39,7 +39,7 @@ _twitch_tab_complete() {
 
   if [[ "$previous_word" =~ ^(live|vod)$ ]]; then
     if [ -s ~/.twitch/broadcaster_cache ]; then
-      completions=( $(ruby -e "require 'json'; puts JSON.load(open(File.join(Dir.home, '.twitch', 'broadcaster_cache'), 'r').read).select{|i| i.match('${current_word}')}.join ' '") )
+      completions=( $(ruby -e "require 'json'; puts JSON.load(open(File.join(Dir.home, '.twitch', 'broadcaster_cache'), 'r').read).join ' '") )
     fi
   elif [ "3" -gt "${words_length}" ]; then
     if [[ "$current_word" == l* ]]; then
@@ -49,7 +49,7 @@ _twitch_tab_complete() {
     fi
   fi
 
-  COMPREPLY=( $(compgen -W "$completions" -- "$word") )
+  COMPREPLY=( $(compgen -W "${completions[*]}" -- "$current_word") )
 }
 
 complete -F _twitch_tab_complete twitch
