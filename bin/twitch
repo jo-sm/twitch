@@ -21,16 +21,18 @@ def api(raw_uri, error_msg)
     uri.open({
       'Client-ID' => client_id
     }).read
-  rescue OpenURI::HTTPError
-    abort error_msg
+  rescue OpenURI::HTTPError => e
+    abort "#{error_msg} (#{e})"
   end
 end
 
 def get_token(type, opts) 
+  suffix = '/access_token?adblock=false&need_https=true&platform=web&player_type=site'
+
   if type == 'live'
-    token_url = "https://api.twitch.tv/api/channels/#{opts["broadcaster"]}/access_token?on_site=1"
+    token_url = "https://api.twitch.tv/api/channels/#{opts["broadcaster"]}#{suffix}"
   elsif type == 'vod'
-    token_url = "https://api.twitch.tv/api/vods/#{opts["video_id"]}/access_token?on_site=1"
+    token_url = "https://api.twitch.tv/api/vods/#{opts["video_id"]}#{suffix}"
   end
 
   raw_token = api(token_url, "Error: Unable to retrieve token")
