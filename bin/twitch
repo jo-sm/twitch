@@ -5,12 +5,21 @@ require 'uri'
 require 'json'
 require 'open-uri'
 require 'fileutils'
+require 'time'
+require 'optparse'
+
+options = {}
+
+OptionParser.new do |opt|
+  opt.on('--limit [LIMIT]', Integer, 'Video limit, default 30') { |o| options[:limit] = o }
+  opt.on('--player PLAYER_NAME', 'Video player, default QuickTime.') { |o| options[:player] = o }
+end.parse!
+
+options[:limit] or options[:limit] = 30
+options[:player] or options[:player] = 'QuickTime Player'
 
 abort "Error: Please supply a mode. Usage: twitch {live,vod} BROADCASTER" if !ARGV[0]
 abort "Error: Please supply a broadcaster. Usage: twitch {live,vod} BROADCASTER" if !ARGV[1]
-
-mode = ARGV[0]
-broadcaster = ARGV[1].downcase
 
 def api(raw_uri, error_msg)
   client_id = 'jzkbprff40iqj646a697cyrvl0zt2m6'
@@ -45,12 +54,28 @@ end
 
 def get_stream_url(type, token, opts)
   if type == 'live'
-    streams_url = "http://usher.justin.tv/api/channel/hls/#{opts["broadcaster"]}.m3u8?token=#{URI.escape(token["token"])}&sig=#{URI.escape(token["sig"])}"
+    params = {
+      'token' => URI.escape(token["token"]),
+      'sig' => URI.escape(token["sig"])
+    }
+
+    streams_url = "http://usher.justin.tv/api/channel/hls/#{opts["broadcaster"]}.m3u8"
   elsif type == 'vod'
-    streams_url = "http://usher.justin.tv/vod/#{opts["video_id"]}?nauth=#{URI.escape(token["token"])}&nauthsig=#{URI.escape(token["sig"])}"
+    params = {
+      :nauth => URI.escape(token["token"]),
+      :nauthsig => URI.escape(token["sig"]),
+      :allow_source => true,
+      :allow_spectre => true,
+      :p => Random.rand(1000000..9999999),
+      :baking_bread => true
+    }
+
+    streams_url = "https://usher.ttvnw.net/vod/#{opts["video_id"]}.m3u8"
   end
 
-  streams = api(streams_url, "Error: Stream is not live")
+  url = "#{streams_url}?#{params.reduce([]) { |memo,(k,v)| memo.push("#{k}=#{v}") }.join('&')}"
+
+  streams = api(url, "Error: Stream is not live")
 
   stream_info = {}
   current_stream = ''
@@ -83,19 +108,20 @@ def get_stream_url(type, token, opts)
   if stream_info['"chunked"']
     puts "Playing quality: chunked @ #{stream_info[current_stream]["bandwidth"]}"
     stream_info['"chunked"']["url"]
-  elsif stream_info['"high"']
-    puts "Playing quality: high @ #{stream_info[current_stream]["bandwidth"]}"
-    stream_info['"high"']["url"]
   else
-    # Just choose one
+    # Pick the first one
     key, val = stream_info.first
     puts "Playing quality: #{key} @ #{stream_info[current_stream]["bandwidth"]}"
     val["url"]
   end
 end
 
-def watch(url)
-  `open -a "QuickTime Player" "#{url}"`
+def watch(url, options)
+  `open -a "#{options[:player]}" "#{url}" 2>/dev/null`
+
+  if $? != 0 and options[:player] != "QuickTime Player"
+    puts "For some reason, the player couldn't be opened properly. Try running 'twitch' without the player argument."
+  end
 end
 
 def add_to_broadcasters_cache(broadcaster)
@@ -128,38 +154,50 @@ def add_to_broadcasters_cache(broadcaster)
   cache_file.close
 end
 
-if mode == 'live'
-  token = get_token('live', { "broadcaster" => broadcaster })
-  stream_url = get_stream_url('live', token, { "broadcaster" => broadcaster })
-  add_to_broadcasters_cache broadcaster
-  watch stream_url
-elsif mode === 'vod'
-  videos = api("https://api.twitch.tv/kraken/channels/#{broadcaster}/videos?broadcasts=true", "Error: Broadcaster does not exist")
-  videos_list = JSON.parse(videos)
+def main(options)
+  mode = ARGV[0]
+  broadcaster = ARGV[1].downcase
 
-  abort "Error: Broadcaster has no saved broadcasts" if videos_list["videos"].length == 0
+  if mode == 'live'
+    token = get_token('live', { "broadcaster" => broadcaster })
+    stream_url = get_stream_url('live', token, { "broadcaster" => broadcaster })
+    add_to_broadcasters_cache broadcaster
+    watch stream_url
+  elsif mode === 'vod'
+    videos = api("https://api.twitch.tv/kraken/channels/#{broadcaster}/videos?broadcasts=true&limit=#{options[:limit]}", "Error: Broadcaster does not exist")
+    videos_list = JSON.parse(videos)
 
-  videos_list["videos"].each_with_index do |video, i|
-    puts "#{i+1}: #{video["title"]}"
-  end
+    abort "Error: Broadcaster has no saved broadcasts" if videos_list["videos"].length == 0
 
-  print "Please select the video you would like to watch: "
-  index = $stdin.gets.strip.to_i
+    videos_list["videos"].each_with_index do |video, i|
+      time = Time.parse(video["recorded_at"]).getlocal.strftime('%a %b %e %Y %l:%M%p')
+      puts "#{i+1}: (#{time}) #{video["title"]}"
+    end
 
-  # TODO: handle pagination
-  while !videos_list["videos"][index-1] or (index < 1)
-    puts "Error: Invalid selection"
     print "Please select the video you would like to watch: "
     index = $stdin.gets.strip.to_i
+
+    while !videos_list["videos"][index-1] or (index < 1)
+      puts "Error: Invalid selection"
+      print "Please select the video you would like to watch: "
+      index = $stdin.gets.strip.to_i
+    end
+
+    video_id = videos_list["videos"][index-1]["_id"][1..-1]
+    token = get_token('vod', { "video_id" => video_id })
+    stream_url = get_stream_url('vod', token, { "video_id" => video_id })
+
+    add_to_broadcasters_cache broadcaster
+
+    watch(stream_url, options)
+  else
+    abort "Error: Invalid mode supplied. Valid modes are: live, vod. Usage: twitch {live,vod} BROADCASTER"
   end
+end
 
-  video_id = videos_list["videos"][index-1]["_id"][1..-1]
-  token = get_token('vod', { "video_id" => video_id })
-  stream_url = get_stream_url('vod', token, { "video_id" => video_id })
-
-  add_to_broadcasters_cache broadcaster
-
-  watch stream_url
-else
-  abort "Error: Invalid mode supplied. Valid modes are: live, vod. Usage: twitch {live,vod} BROADCASTER"
+begin
+  main(options)
+rescue SystemExit, Interrupt
+  puts ""
+  exit
 end

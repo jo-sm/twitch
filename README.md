@@ -10,7 +10,7 @@ You will need to download the source using git, build it into a gem, and install
 > git clone https://github.com/jo-sm/twitch
 > cd twitch
 > gem build twitch.gemspec
-> gem install twitch-0.0.4.gem
+> gem install twitch-<VERSION>.gem
 ```
 
 ## Usage
@@ -22,7 +22,13 @@ You can run the global `twitch` command from the command line, which takes two a
 > twitch vod frankerz
 ```
 
-When choosing the `vod` option, you will be presented with the 10 latest VODs, with which you can choose by number and watch like you would a live stream.
+You can also supply two flags, `--limit` and `--player`. By default, the limit is `30` and the player is `QuickTime Player`, but you can change it to suit your specific usage. An example usage:
+
+```
+> twitch live frankerz --limit 20 --player VLC
+```
+
+Generally, I use QuickTime Player, but there are some cases where it cannot parse a playlist. VLC is more robust, and when I find that QuickTime has issues, I will supply `VLC` to the player flag.
 
 ## Tab Completion
 
@@ -57,9 +63,9 @@ complete -F _twitch_tab_complete twitch
 
 ## Notes
 
-This gem uses private APIs and may break at any time. This was built before Twitch was using HLS for all of their streams and was still using Flash, which meant that it was only usable on Chrome (as I didn't have Flash installed on Safari) and meant my laptop would work much harder. This gem bypasses that by playing the same content in QuickTime. It's not as useful now, as Twitch has switched over mainly to HLS streaming, but it's still convenient from a OS standpoint as it runs in a separate process from the browser (meaning you can command-tab between browser and Quicktime).
+This gem uses private APIs and may break at any time. I do use the gem regularly and do update it, but if something is broken, please be patient. The main reason that I wrote this was that before Twitch switched to HLS streaming, it used a very resource intensive Flash player, but allowed HLS streaming for specific platforms like the iOS app. All of the web players use HLS by default now, but I still prefer to watch in a different window rather than in the browser.
 
-If you use this gem, consider subscribing or donating to the streamer as this bypasses the Twitch player and the ads that are delivered with it! Show them some financial support!
+If you use this gem, consider subscribing or donating to the streamer as this bypasses the Twitch player and the ads that are delivered with it. Show them some financial support!
 
 ## License
 
