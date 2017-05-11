@@ -88,9 +88,9 @@ def get_stream_url(type, token, opts)
       end
 
       if line.start_with? "#EXT-X-STREAM-INF:"
-          values = line[18..-1].split('=').map { |p| 
-              p.split(',') 
-          }.reduce([]) { |memo, i| 
+          values = line[18..-1].split('=').map { |p|
+              p.split(',')
+          }.reduce([]) { |memo, i|
               if i.length == 1
                   if memo.length == 0
                       memo.push(i)
@@ -113,7 +113,7 @@ def get_stream_url(type, token, opts)
           sources[values[:video]] = {
               :video => values[:video].gsub('"', ''),
               :url => streams[i+1],
-              :resolution => values[:resolution],
+              :resolution => values[:resolution].gsub('"', ''),
               :bandwidth => values[:bandwidth]
           }
 
@@ -132,7 +132,7 @@ def get_stream_url(type, token, opts)
     unit = 'mb'
   end
 
-  puts "Playing quality: #{source[:video]} @ #{bandwidth} #{unit}/s"
+  puts "Playing quality: #{source[:video]} (#{source[:resolution]}) @ #{bandwidth} #{unit}/s"
 
   source[:url]
 end
