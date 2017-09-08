@@ -22,13 +22,15 @@ You can run the global `twitch` command from the command line, which takes two a
 > twitch vod frankerz
 ```
 
-You can also supply two flags, `--limit` and `--player`. By default, the limit is `30` and the player is `QuickTime Player`, but you can change it to suit your specific usage. An example usage:
+You can supply four flags: `--limit`, which is the number of streams requested to the API, defaulted to 30; `--player`, which is the player that is used to play the stream, defaulted to QuickTime Player; `--skip-quality`, which skips the quality menu this one time; and `--always-skip`, which always skips the quality menu and just plays the highest bandwidth available. You can see all these flags with the `--help` flag.
+
+An example usage:
 
 ```
 > twitch live frankerz --limit 20 --player VLC
 ```
 
-Generally, I use QuickTime Player, but there are some cases where it cannot parse a playlist. VLC is more robust, and when I find that QuickTime has issues, I will supply `VLC` to the player flag.
+I generally use QuickTime Player, because it handles videos with more power efficiency than other players, but there are some cases where it cannot parse a playlist. When I encounter an issue I use VLC or mplayer.
 
 ## Tab Completion
 
