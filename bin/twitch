@@ -11,12 +11,16 @@ require 'optparse'
 options = {}
 
 OptionParser.new do |opt|
-  opt.on('--limit [LIMIT]', Integer, 'Video limit, default 30') { |o| options[:limit] = o }
+  opt.on('--limit [LIMIT]', Integer, 'API request video limit, default 30') { |o| options[:limit] = o }
   opt.on('--player PLAYER_NAME', 'Video player, default QuickTime.') { |o| options[:player] = o }
+  opt.on('--skip-quality', 'Skip quality question. Plays the highest available bandwidth.') { |o| options[:skip_quality] = o }
+  opt.on('--always-skip', 'Always skips quality question in the future.') { |o| options[:always_skip] = o }
 end.parse!
 
 options[:limit] or options[:limit] = 30
 options[:player] or options[:player] = 'QuickTime Player'
+options[:skip_quality] or options[:skip_quality] = false
+options[:always_skip] or options[:always_skip] = false
 
 abort "Error: Please supply a mode. Usage: twitch {live,vod} BROADCASTER" if !ARGV[0]
 abort "Error: Please supply a broadcaster. Usage: twitch {live,vod} BROADCASTER" if !ARGV[1]
@@ -52,7 +56,7 @@ def get_token(type, opts)
   token
 end
 
-def get_stream_url(type, token, opts)
+def get_stream_info(type, token, opts)
   if type == 'live'
     params = {
       'token' => URI.escape(token["token"]),
@@ -79,7 +83,7 @@ def get_stream_url(type, token, opts)
   streams = raw.split("\n")
 
   skip = false
-  sources = {}
+  sources = []
 
   streams.each_with_index do |line, i| 
       if skip
@@ -110,34 +114,78 @@ def get_stream_url(type, token, opts)
               memo
           }
 
-          sources[values[:video]] = {
-              :video => values[:video].gsub('"', ''),
+          source_name = values[:video].gsub('"', '')
+
+          sources.push({
+              :video => source_name,
               :url => streams[i+1],
               :resolution => values[:resolution].gsub('"', ''),
-              :bandwidth => values[:bandwidth]
-          }
+              :bandwidth => values[:bandwidth].to_f
+          })
 
           skip = true
           next
       end
   end
 
-  # Get the source with the highest bandwidth
-  source = sources.values.max_by { |source| source[:bandwidth].to_i }
-  bandwidth = (source[:bandwidth].to_f / 1000).round(2)
-  unit = 'kb'
-
-  if bandwidth > 1000
-    bandwidth = (bandwidth / 1000).round(2)
-    unit = 'mb'
-  end
-
-  puts "Playing quality: #{source[:video]} (#{source[:resolution]}) @ #{bandwidth} #{unit}/s"
-
-  source[:url]
+  determine_quality sources, opts
 end
 
-def watch(url, options)
+def bandwidth_to_human(bandwidth)
+  unit = 'b'
+
+  if bandwidth > 1000000
+    unit = 'mb'
+    bandwidth = (bandwidth / 1000000).round(2)
+  elsif bandwidth > 1000
+    unit = 'kb'
+    bandwidth = (bandwidth / 1000).round(2)
+  end
+
+  "#{bandwidth} #{unit}/s"
+end
+
+def determine_quality(sources, opts)
+  config = read_config
+  should_skip = false
+
+  if opts[:skip_quality]
+    should_skip = true
+  elsif config["always_skip"]
+    should_skip = true
+  end
+
+  if should_skip
+    source = sources.max_by { |source| source[:bandwidth] }
+  else
+    puts
+    puts "Available qualities:"
+
+    sources.each_with_index do |source, i|
+      puts "#{i+1}: #{source[:resolution]} (#{bandwidth_to_human(source[:bandwidth])})"
+    end
+
+    print "Select quality: "
+    index = $stdin.gets.strip.to_i
+
+    while !sources[index-1] or (index < 1)
+      puts "Error: Invalid selection"
+      print "Select quality: "
+      index = $stdin.gets.strip.to_i
+    end
+
+    source = sources[index-1]
+  end
+
+  source
+end
+
+def watch(source, options)
+  url = source[:url]
+
+  puts
+  puts "Playing quality: #{source[:video]} (#{source[:resolution]}) @ #{bandwidth_to_human(source[:bandwidth])}"
+
   # Attempt to open with the open command, since it may be a GUI program
   `open -a "#{options[:player]}" "#{url}" 2>/dev/null`
 
@@ -155,45 +203,110 @@ def watch(url, options)
   end
 end
 
-def add_to_broadcasters_cache(broadcaster)
+def read_config
   config_home = File.join(Dir.home, ".twitch")
-  broadcaster_cache_file = File.join(config_home, "broadcaster_cache")
+  filename = File.join(config_home, 'config')
 
   begin
     Dir.mkdir(config_home, 0755)
   rescue Errno::EEXIST
   end
 
-  FileUtils.touch(broadcaster_cache_file)
+  FileUtils.touch(filename)
 
-  cache_file = open(broadcaster_cache_file, 'r')
-  cache = cache_file.read
-  cache_file.close
+  # Reads config file and attempts to parse its JSON
+  file = open(filename, 'r')
+  config = file.read
+  file.close
 
   begin
-    cache = JSON.parse(cache)
+    config = JSON.parse(config)
   rescue JSON::ParserError
-    cache = []
+    config = {}
   end
 
-  cache << broadcaster
+  config
+end
 
-  cache.uniq!
+def write_config!(config)
+  config_home = File.join(Dir.home, ".twitch")
+  filename = File.join(config_home, "config")
 
-  cache_file = open(broadcaster_cache_file, 'w')
-  JSON.dump(cache, cache_file)
-  cache_file.close
+  config_file = open(filename, 'w')
+  JSON.dump(config, config_file)
+  config_file.close
+end
+
+def always_skip_check(options)
+  if options[:always_skip]
+    config = read_config
+
+    config[:always_skip] = true
+
+    write_config! config
+  end
+end
+
+def add_to_broadcasters_cache(broadcaster)
+  config = read_config
+
+  config["broadcasters"].is_a?(Array) or config["broadcasters"] = []
+
+  config["broadcasters"] << broadcaster
+  config["broadcasters"].uniq!
+
+  write_config! config
+end
+
+def rewrite_broadcasters_cache
+  # A simple utility to take an existing broadcasters cache and rewrite
+  # it to the new config file
+
+  config_home = File.join(Dir.home, ".twitch")
+  filename = File.join(config_home, 'broadcaster_cache')
+  config = {}
+
+  begin
+    Dir.mkdir(config_home, 0755)
+  rescue Errno::EEXIST
+  end
+
+  FileUtils.touch(filename)
+
+  begin
+  # Reads config file and attempts to parse its JSON
+    io = open(filename, 'r')
+    file = io.read
+
+    begin
+      broadcasters = JSON.parse(file)
+    rescue JSON::ParserError
+      return
+    end
+
+    io.close
+
+    config["broadcasters"] = broadcasters
+    write_config! config
+
+    File.delete(filename)
+  rescue Errno::ENOENT
+    return
+  end
 end
 
 def main(options)
   mode = ARGV[0]
   broadcaster = ARGV[1].downcase
 
+  rewrite_broadcasters_cache
+  always_skip_check options
+
   if mode == 'live'
     token = get_token('live', { "broadcaster" => broadcaster })
-    stream_url = get_stream_url('live', token, { "broadcaster" => broadcaster })
+    stream = get_stream_info('live', token, { "broadcaster" => broadcaster, :skip_quality => options[:skip_quality] })
     add_to_broadcasters_cache broadcaster
-    watch stream_url, options
+    watch stream, options
   elsif mode === 'vod'
     videos = api("https://api.twitch.tv/kraken/channels/#{broadcaster}/videos?broadcasts=true&limit=#{options[:limit]}", "Error: Broadcaster does not exist")
     videos_list = JSON.parse(videos)
@@ -216,11 +329,11 @@ def main(options)
 
     video_id = videos_list["videos"][index-1]["_id"][1..-1]
     token = get_token('vod', { "video_id" => video_id })
-    stream_url = get_stream_url('vod', token, { "video_id" => video_id })
+    stream = get_stream_info('vod', token, { "video_id" => video_id, :skip_quality => options[:skip_quality] })
 
     add_to_broadcasters_cache broadcaster
 
-    watch stream_url, options
+    watch stream, options
   else
     abort "Error: Invalid mode supplied. Valid modes are: live, vod. Usage: twitch {live,vod} BROADCASTER"
   end
