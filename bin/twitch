@@ -60,10 +60,14 @@ def get_stream_info(type, token, opts)
   if type == 'live'
     params = {
       'token' => URI.escape(token["token"]),
-      'sig' => URI.escape(token["sig"])
+      'sig' => URI.escape(token["sig"]),
+      'allow_source' => true,
+      'player_backend' => 'html5',
+      :baking_bread => true,
+      :p => Random.rand(1000000..9999999),
     }
 
-    streams_url = "http://usher.justin.tv/api/channel/hls/#{opts["broadcaster"]}.m3u8"
+    streams_url = "https://usher.ttvnw.net/api/channel/hls/#{opts["broadcaster"]}.m3u8"
   elsif type == 'vod'
     params = {
       :nauth => URI.escape(token["token"]),
@@ -158,7 +162,6 @@ def determine_quality(sources, opts)
   if should_skip
     source = sources.max_by { |source| source[:bandwidth] }
   else
-    puts
     puts "Available qualities:"
 
     sources.each_with_index do |source, i|
@@ -326,6 +329,9 @@ def main(options)
       print "Please select the video you would like to watch: "
       index = $stdin.gets.strip.to_i
     end
+
+    # Put a newline for better spacing
+    puts
 
     video_id = videos_list["videos"][index-1]["_id"][1..-1]
     token = get_token('vod', { "video_id" => video_id })
