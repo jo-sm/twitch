@@ -44,8 +44,8 @@ _twitch_tab_complete() {
   local words_length="${#COMP_WORDS[@]}"
 
   if [[ "$previous_word" =~ ^(live|vod)$ ]]; then
-    if [ -s ~/.twitch/broadcaster_cache ]; then
-      completions=( $(ruby -e "require 'json'; puts JSON.load(open(File.join(Dir.home, '.twitch', 'broadcaster_cache'), 'r').read).join ' '") )
+    if [ -s ~/.twitch/config ]; then
+      completions=( $(ruby -e "require 'json'; puts JSON.load(open(File.join(Dir.home, '.twitch', 'config'), 'r').read)[\"broadcasters\"].join ' '") )
     fi
   elif [ "3" -gt "${words_length}" ]; then
     if [[ "$current_word" == l* ]]; then
