@@ -11,16 +11,20 @@ require 'optparse'
 options = {}
 
 OptionParser.new do |opt|
-  opt.on('--limit [LIMIT]', Integer, 'API request video limit, default 30') { |o| options[:limit] = o }
+  opt.on('--limit LIMIT', Integer, 'API request video limit, default 30.') { |o| options[:limit] = o }
   opt.on('--player PLAYER_NAME', 'Video player, default QuickTime.') { |o| options[:player] = o }
-  opt.on('--skip-quality', 'Skip quality question. Plays the highest available bandwidth.') { |o| options[:skip_quality] = o }
-  opt.on('--always-skip', 'Always skips quality question in the future.') { |o| options[:always_skip] = o }
+  opt.on('--bitrate', 'Play video with highest bitrate.') { |o| options[:bitrate] = o }
+  opt.on('--resolution', 'Play video with highest resolution.') { |o| options[:resolution] = o }
+  opt.on('--always', 'Always play highest bitrate/resolution available.') { |o| options[:always] = o }
+  opt.on('--reset', 'Resets your configuration. Preserves previously played broadcasters.') { |o| options[:reset] = o }
 end.parse!
 
 options[:limit] or options[:limit] = 30
 options[:player] or options[:player] = 'QuickTime Player'
-options[:skip_quality] or options[:skip_quality] = false
-options[:always_skip] or options[:always_skip] = false
+options[:bitrate] or options[:bitrate] = false
+options[:resolution] or options[:resolution] = false
+options[:always] or options[:always] = false
+options[:reset] or options[:reset] = false
 
 abort "Error: Please supply a mode. Usage: twitch {live,vod} BROADCASTER" if !ARGV[0]
 abort "Error: Please supply a broadcaster. Usage: twitch {live,vod} BROADCASTER" if !ARGV[1]
@@ -119,12 +123,18 @@ def get_stream_info(type, token, opts)
           }
 
           source_name = values[:video].gsub('"', '')
+          true_resolution = values[:resolution].split('x').map { |val|
+            val.to_i
+          }.reduce { |product, val|
+            product * val
+          }
 
           sources.push({
-              :video => source_name,
-              :url => streams[i+1],
-              :resolution => values[:resolution].gsub('"', ''),
-              :bandwidth => values[:bandwidth].to_f
+            :video => source_name,
+            :url => streams[i+1],
+            :resolution => values[:resolution].gsub('"', ''),
+            :true_resolution => true_resolution,
+            :bandwidth => values[:bandwidth].to_f
           })
 
           skip = true
@@ -151,16 +161,24 @@ end
 
 def determine_quality(sources, opts)
   config = read_config
-  should_skip = false
+  autoplay = nil
 
-  if opts[:skip_quality]
-    should_skip = true
-  elsif config["always_skip"]
-    should_skip = true
+  if config["always"]
+    autoplay = config["always"]
+  elsif opts["bitrate"]
+    autoplay = 'bitrate'
+  elsif opts["resolution"]
+    autoplay = 'resolution'
   end
 
-  if should_skip
-    source = sources.max_by { |source| source[:bandwidth] }
+  if autoplay
+    if autoplay == 'resolution'
+      # puts "Automatically selecting stream with highest resolution...\n"
+      source = sources.max_by { |source| source[:true_resolution] }
+    elsif autoplay == 'bitrate'
+      # puts "Automatically selecting stream with highest bitrate...\n"
+      source = sources.max_by { |source| source[:bandwidth] }
+    end
   else
     puts "Available qualities:"
 
@@ -186,8 +204,7 @@ end
 def watch(source, options)
   url = source[:url]
 
-  puts
-  puts "Playing quality: #{source[:video]} (#{source[:resolution]}) @ #{bandwidth_to_human(source[:bandwidth])}"
+  puts "\nPlaying quality: #{source[:video]} (#{source[:resolution]}) @ #{bandwidth_to_human(source[:bandwidth])}"
 
   # Attempt to open with the open command, since it may be a GUI program
   `open -a "#{options[:player]}" "#{url}" 2>/dev/null`
@@ -240,11 +257,53 @@ def write_config!(config)
   config_file.close
 end
 
+def validate_options(options)
+  # Make sure that the always flag has either bitrate or
+  # resolution flag given, but not both
+
+  if options[:always]
+    if options[:bitrate] and options[:resolution]
+      abort "The --always flag allows either --bitrate or --resolution flag, but not both."
+    end
+
+    if !options[:bitrate] and !options[:resolution]
+      abort "The --always flag requires either --bitrate or --resolution flag."
+    end
+  end
+
+  if options[:bitrate] and options[:resolution]
+    abort "The --bitrate and --resolution flags cannot be supplied together."
+  end
+end
+
+def reset_config
+  # puts "Resetting config file...\n"
+
+  config = read_config
+
+  bcache = config["broadcasters"]
+
+  config = { :broadcasters => bcache }
+
+  write_config! config
+end
+
 def always_skip_check(options)
-  if options[:always_skip]
+  if options[:always]
+    # Only write if we are also supplied with the bitrate
+    # or resolution flag
     config = read_config
 
-    config[:always_skip] = true
+    if options[:resolution]
+      config["always"] = 'resolution'
+    elsif options[:bitrate]
+      config["always"] = 'bitrate'
+    end
+
+    # puts "Will always select stream with highest #{config[:always]} in the future.\n\n"
+
+    # Remove previous "always_skip" option if present
+    config.delete("always_skip")
 
     write_config! config
   end
@@ -303,11 +362,22 @@ def main(options)
   broadcaster = ARGV[1].downcase
 
   rewrite_broadcasters_cache
+  validate_options options
+
+  if options[:reset]
+    reset_config
+  end
+
   always_skip_check options
 
   if mode == 'live'
     token = get_token('live', { "broadcaster" => broadcaster })
-    stream = get_stream_info('live', token, { "broadcaster" => broadcaster, :skip_quality => options[:skip_quality] })
+    stream = get_stream_info('live', token, {
+      "broadcaster" => broadcaster,
+      "bitrate" => options[:bitrate],
+      "resolution" => options[:resolution]
+    })
+
     add_to_broadcasters_cache broadcaster
     watch stream, options
   elsif mode === 'vod'
@@ -335,7 +405,11 @@ def main(options)
 
     video_id = videos_list["videos"][index-1]["_id"][1..-1]
     token = get_token('vod', { "video_id" => video_id })
-    stream = get_stream_info('vod', token, { "video_id" => video_id, :skip_quality => options[:skip_quality] })
+    stream = get_stream_info('vod', token, {
+      "video_id" => video_id,
+      "bitrate" => options[:bitrate],
+      "resolution" => options[:resolution]
+    })
 
     add_to_broadcasters_cache broadcaster
 
