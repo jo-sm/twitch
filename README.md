@@ -22,7 +22,7 @@ You can run the global `twitch` command from the command line, which takes two a
 > twitch vod frankerz
 ```
 
-You can supply four flags: `--limit`, which is the number of streams requested to the API, defaulted to 30; `--player`, which is the player that is used to play the stream, defaulted to QuickTime Player; `--skip-quality`, which skips the quality menu this one time; and `--always-skip`, which always skips the quality menu and just plays the highest bandwidth available. You can see all these flags with the `--help` flag.
+You can supply five flags: `--limit`, which is the number of streams requested to the API, defaulted to 30; `--player`, which is the player that is used to play the stream, defaulted to QuickTime Player; `--resolution` and `--bitrate`, which select the highest available resolution or bitrate for this stream; and `--always`, which always skips the quality menu and plays the highest resolution/bitrate. You can see all these flags with the `--help` flag.
 
 An example usage:
 
