@@ -8,212 +8,51 @@ require 'fileutils'
 require 'time'
 require 'optparse'
 
+require_relative '../lib/twitch/utils.rb'
+
 options = {}
 
 OptionParser.new do |opt|
-  opt.on('--limit LIMIT', Integer, 'API request video limit, default 30.') { |o| options[:limit] = o }
-  opt.on('--player PLAYER_NAME', 'Video player, default QuickTime.') { |o| options[:player] = o }
-  opt.on('--bitrate', 'Play video with highest bitrate.') { |o| options[:bitrate] = o }
-  opt.on('--resolution', 'Play video with highest resolution.') { |o| options[:resolution] = o }
-  opt.on('--always', 'Always play highest bitrate/resolution available.') { |o| options[:always] = o }
-  opt.on('--reset', 'Resets your configuration. Preserves previously played broadcasters.') { |o| options[:reset] = o }
+  opt.on('--limit LIMIT', Integer, 'API request video limit, default 30.') { |o| options['limit'] = o }
+  opt.on('--player PLAYER_NAME', 'Video player, default QuickTime.') { |o| options['player'] = o }
+  opt.on('--bitrate', 'Play video with highest bitrate.') { |o| options['bitrate'] = o }
+  opt.on('--resolution', 'Play video with highest resolution.') { |o| options['resolution'] = o }
+  opt.on('--always', 'Always play highest bitrate/resolution available.') { |o| options['always'] = o }
+  opt.on('--reset', 'Resets your configuration. Preserves previously played broadcasters.') { |o| options['reset'] = o }
 end.parse!
 
-options[:limit] or options[:limit] = 30
-options[:player] or options[:player] = 'QuickTime Player'
-options[:bitrate] or options[:bitrate] = false
-options[:resolution] or options[:resolution] = false
-options[:always] or options[:always] = false
-options[:reset] or options[:reset] = false
+options['limit'] or options['limit'] = 30
+options['player'] or options['player'] = 'QuickTime Player'
+options['bitrate'] or options['bitrate'] = false
+options['resolution'] or options['resolution'] = false
+options['always'] or options['always'] = false
+options['reset'] or options['reset'] = false
 
 abort "Error: Please supply a mode. Usage: twitch {live,vod} BROADCASTER" if !ARGV[0]
 abort "Error: Please supply a broadcaster. Usage: twitch {live,vod} BROADCASTER" if !ARGV[1]
 
-def api(raw_uri, error_msg)
-  client_id = 'jzkbprff40iqj646a697cyrvl0zt2m6'
-
-  uri = URI.parse(raw_uri)
-
-  begin
-    uri.open({
-      'Client-ID' => client_id
-    }).read
-  rescue OpenURI::HTTPError => e
-    abort "#{error_msg} (#{e})"
-  end
-end
-
-def get_token(type, opts) 
-  suffix = '/access_token?adblock=false&need_https=true&platform=web&player_type=site'
-
-  if type == 'live'
-    token_url = "https://api.twitch.tv/api/channels/#{opts["broadcaster"]}#{suffix}"
-  elsif type == 'vod'
-    token_url = "https://api.twitch.tv/api/vods/#{opts["video_id"]}#{suffix}"
-  end
-
-  raw_token = api(token_url, "Error: Unable to retrieve token")
-  token = JSON.parse(raw_token)
-
-  raise "Error: #{token["message"]}" if token["error"]
-
-  token
-end
-
 def get_stream_info(type, token, opts)
-  if type == 'live'
-    params = {
-      'token' => URI.escape(token["token"]),
-      'sig' => URI.escape(token["sig"]),
-      'allow_source' => true,
-      'player_backend' => 'html5',
-      :baking_bread => true,
-      :p => Random.rand(1000000..9999999),
-    }
+  raw = Twitch::Utils.api(url, "Error: Stream is not live")
 
-    streams_url = "https://usher.ttvnw.net/api/channel/hls/#{opts["broadcaster"]}.m3u8"
-  elsif type == 'vod'
-    params = {
-      :nauth => URI.escape(token["token"]),
-      :nauthsig => URI.escape(token["sig"]),
-      :allow_source => true,
-      :allow_spectre => true,
-      :p => Random.rand(1000000..9999999),
-      :baking_bread => true
-    }
+  sources = Twitch::Utils.parse_m3u8 raw
 
-    streams_url = "https://usher.ttvnw.net/vod/#{opts["video_id"]}.m3u8"
-  end
-
-  url = "#{streams_url}?#{params.reduce([]) { |memo,(k,v)| memo.push("#{k}=#{v}") }.join('&')}"
-
-  raw = api(url, "Error: Stream is not live")
-  streams = raw.split("\n")
-
-  skip = false
-  sources = []
-
-  streams.each_with_index do |line, i| 
-      if skip
-          skip = false
-          next
-      end
-
-      if line.start_with? "#EXT-X-STREAM-INF:"
-          values = line[18..-1].split('=').map { |p|
-              p.split(',')
-          }.reduce([]) { |memo, i|
-              if i.length == 1
-                  if memo.length == 0
-                      memo.push(i)
-                  else
-                      memo[-1].push(i)
-                  end
-              else
-                  memo[-1].push(i[0..-2])
-                  memo.push([i[-1]])
-              end
-
-              memo
-          }.reduce({}) { |memo, i|
-              name = i[0].downcase.split('-').join('_').to_sym
-              memo[name] = i[1..-1].join(',')
-
-              memo
-          }
-
-          source_name = values[:video].gsub('"', '')
-          true_resolution = values[:resolution].split('x').map { |val|
-            val.to_i
-          }.reduce { |product, val|
-            product * val
-          }
-
-          sources.push({
-            :video => source_name,
-            :url => streams[i+1],
-            :resolution => values[:resolution].gsub('"', ''),
-            :true_resolution => true_resolution,
-            :bandwidth => values[:bandwidth].to_f
-          })
-
-          skip = true
-          next
-      end
-  end
-
-  determine_quality sources, opts
-end
-
-def bandwidth_to_human(bandwidth)
-  unit = 'b'
-
-  if bandwidth > 1000000
-    unit = 'mb'
-    bandwidth = (bandwidth / 1000000).round(2)
-  elsif bandwidth > 1000
-    unit = 'kb'
-    bandwidth = (bandwidth / 1000).round(2)
-  end
-
-  "#{bandwidth} #{unit}/s"
-end
-
-def determine_quality(sources, opts)
-  config = read_config
-  autoplay = nil
-
-  if config["always"]
-    autoplay = config["always"]
-  elsif opts["bitrate"]
-    autoplay = 'bitrate'
-  elsif opts["resolution"]
-    autoplay = 'resolution'
-  end
-
-  if autoplay
-    if autoplay == 'resolution'
-      # puts "Automatically selecting stream with highest resolution...\n"
-      source = sources.max_by { |source| source[:true_resolution] }
-    elsif autoplay == 'bitrate'
-      # puts "Automatically selecting stream with highest bitrate...\n"
-      source = sources.max_by { |source| source[:bandwidth] }
-    end
-  else
-    puts "Available qualities:"
-
-    sources.each_with_index do |source, i|
-      puts "#{i+1}: #{source[:resolution]} (#{bandwidth_to_human(source[:bandwidth])})"
-    end
-
-    print "Select quality: "
-    index = $stdin.gets.strip.to_i
-
-    while !sources[index-1] or (index < 1)
-      puts "Error: Invalid selection"
-      print "Select quality: "
-      index = $stdin.gets.strip.to_i
-    end
-
-    source = sources[index-1]
-  end
-
-  source
+  Twitch::Utils.determine_quality sources, opts
 end
 
 def watch(source, options)
-  url = source[:url]
+  url = source['url']
+  bitrate = Twitch::Utils.bandwidth_to_human(source['bandwidth'])
 
-  puts "\nPlaying quality: #{source[:video]} (#{source[:resolution]}) @ #{bandwidth_to_human(source[:bandwidth])}"
+  puts "\nPlaying quality: #{source['video']} (#{source['resolution']}) @ #{bitrate}"
 
   # Attempt to open with the open command, since it may be a GUI program
-  `open -a "#{options[:player]}" "#{url}" 2>/dev/null`
+  `open -a "#{options['player']}" "#{url}" 2>/dev/null`
 
-  if $? != 0 and options[:player] != "QuickTime Player"
+  if $? != 0 and options['player'] != "QuickTime Player"
     # Attempt to run as a command line program
     # This may affect how the process is seen by Activity Monitor (
     # may be seen as a child of the bash process)
-    pid=`#{options[:player]} "#{url}" 2&>1 &`
+    pid=`#{options['player']} "#{url}" 2&>1 &`
 
     puts pid
 
@@ -223,170 +62,39 @@ def watch(source, options)
   end
 end
 
-def read_config
-  config_home = File.join(Dir.home, ".twitch")
-  filename = File.join(config_home, 'config')
-
-  begin
-    Dir.mkdir(config_home, 0755)
-  rescue Errno::EEXIST
-  end
-
-  FileUtils.touch(filename)
-
-  # Reads config file and attempts to parse its JSON
-  file = open(filename, 'r')
-  config = file.read
-  file.close
-
-  begin
-    config = JSON.parse(config)
-  rescue JSON::ParserError
-    config = {}
-  end
-
-  config
-end
-
-def write_config!(config)
-  config_home = File.join(Dir.home, ".twitch")
-  filename = File.join(config_home, "config")
-
-  config_file = open(filename, 'w')
-  JSON.dump(config, config_file)
-  config_file.close
-end
-
-def validate_options(options)
-  # Make sure that the always flag has either bitrate or
-  # resolution flag given, but not both
-
-  if options[:always]
-    if options[:bitrate] and options[:resolution]
-      abort "The --always flag allows either --bitrate or --resolution flag, but not both."
-    end
-
-    if !options[:bitrate] and !options[:resolution]
-      abort "The --always flag requires either --bitrate or --resolution flag."
-    end
-  end
-
-  if options[:bitrate] and options[:resolution]
-    abort "The --bitrate and --resolution flags cannot be supplied together."
-  end
-end
-
-def reset_config
-  # puts "Resetting config file...\n"
-
-  config = read_config
-
-  bcache = config["broadcasters"]
-
-  config = { :broadcasters => bcache }
-
-  write_config! config
-end
-
-def always_skip_check(options)
-  if options[:always]
-    # Only write if we are also supplied with the bitrate
-    # or resolution flag
-    config = read_config
-
-    if options[:resolution]
-      config["always"] = 'resolution'
-    elsif options[:bitrate]
-      config["always"] = 'bitrate'
-    end
-
-    # puts "Will always select stream with highest #{config[:always]} in the future.\n\n"
-
-    # Remove previous "always_skip" option if present
-    config.delete("always_skip")
-
-    write_config! config
-  end
-end
-
-def add_to_broadcasters_cache(broadcaster)
-  config = read_config
-
-  config["broadcasters"].is_a?(Array) or config["broadcasters"] = []
-
-  config["broadcasters"] << broadcaster
-  config["broadcasters"].uniq!
-
-  write_config! config
-end
-
-def rewrite_broadcasters_cache
-  # A simple utility to take an existing broadcasters cache and rewrite
-  # it to the new config file
-
-  config_home = File.join(Dir.home, ".twitch")
-  filename = File.join(config_home, 'broadcaster_cache')
-  config = {}
-
-  begin
-    Dir.mkdir(config_home, 0755)
-  rescue Errno::EEXIST
-  end
-
-  FileUtils.touch(filename)
-
-  begin
-  # Reads config file and attempts to parse its JSON
-    io = open(filename, 'r')
-    file = io.read
-
-    begin
-      broadcasters = JSON.parse(file)
-    rescue JSON::ParserError
-      return
-    end
-
-    io.close
-
-    config["broadcasters"] = broadcasters
-    write_config! config
-
-    File.delete(filename)
-  rescue Errno::ENOENT
-    return
-  end
-end
-
 def main(options)
   mode = ARGV[0]
   broadcaster = ARGV[1].downcase
 
-  rewrite_broadcasters_cache
-  validate_options options
+  Twitch::Utils.rewrite_broadcasters_cache
+  Twitch::Utils.validate_options options
 
-  if options[:reset]
-    reset_config
+  if options['reset']
+    Twitch::Utils.reset_config
   end
 
-  always_skip_check options
+  Twitch::Utils.always_skip_check options
+
+  if mode != 'live' && mode != 'vod'
+    abort "Error: Invalid mode supplied. Valid modes are: live, vod. Usage: twitch {live,vod} BROADCASTER"
+  end
+
+  error_msg = nil
 
   if mode == 'live'
-    token = get_token('live', { "broadcaster" => broadcaster })
-    stream = get_stream_info('live', token, {
-      "broadcaster" => broadcaster,
-      "bitrate" => options[:bitrate],
-      "resolution" => options[:resolution]
+    token = Twitch::Utils.get_token('live', { 'broadcaster' => broadcaster })
+    m3u8_url = Twitch::Utils.m3u8_url('live', token, {
+      'broadcaster' => broadcaster,
+      'bitrate' => options['bitrate'],
+      'resolution' => options['resolution']
     })
-
-    add_to_broadcasters_cache broadcaster
-    watch stream, options
   elsif mode === 'vod'
-    videos = api("https://api.twitch.tv/kraken/channels/#{broadcaster}/videos?broadcasts=true&limit=#{options[:limit]}", "Error: Broadcaster does not exist")
-    videos_list = JSON.parse(videos)
+    vods_list = Twitch::Utils.get_vods_list(broadcaster, {
+      'limit' => options['limit']  
+    })
+    abort "Error: Broadcaster has no saved broadcasts" if vods_list["videos"].length == 0
 
-    abort "Error: Broadcaster has no saved broadcasts" if videos_list["videos"].length == 0
-
-    videos_list["videos"].each_with_index do |video, i|
+    vods_list["videos"].each_with_index do |video, i|
       time = Time.parse(video["recorded_at"]).getlocal.strftime('%a %b %e %Y %l:%M%p')
       puts "#{i+1}: (#{time}) #{video["title"]}"
     end
@@ -394,7 +102,7 @@ def main(options)
     print "Please select the video you would like to watch: "
     index = $stdin.gets.strip.to_i
 
-    while !videos_list["videos"][index-1] or (index < 1)
+    while !vods_list["videos"][index-1] or (index < 1)
       puts "Error: Invalid selection"
       print "Please select the video you would like to watch: "
       index = $stdin.gets.strip.to_i
@@ -403,20 +111,23 @@ def main(options)
     # Put a newline for better spacing
     puts
 
-    video_id = videos_list["videos"][index-1]["_id"][1..-1]
-    token = get_token('vod', { "video_id" => video_id })
-    stream = get_stream_info('vod', token, {
-      "video_id" => video_id,
-      "bitrate" => options[:bitrate],
-      "resolution" => options[:resolution]
+    video_id = vods_list["videos"][index-1]["_id"][1..-1]
+
+    token = Twitch::Utils.get_token('vod', { 'video_id' => video_id })
+    m3u8_url = Twitch::Utils.m3u8_url('vod', token, {
+      'video_id' => video_id,
+      'bitrate' => options['bitrate'],
+      'resolution' => options['resolution']
     })
-
-    add_to_broadcasters_cache broadcaster
-
-    watch stream, options
-  else
-    abort "Error: Invalid mode supplied. Valid modes are: live, vod. Usage: twitch {live,vod} BROADCASTER"
   end
+
+  raw_m3u8 = Twitch::Utils.api(m3u8_url, "Error: Could not retrieve m3u8 playlist from API")
+  parsed = Twitch::Utils.parse_m3u8(raw_m3u8)
+  selected_stream = Twitch::Utils.ask_user_which_quality(parsed, options)
+
+  Twitch::Utils.add_to_broadcasters_cache broadcaster
+
+  watch selected_stream, options
 end
 
 begin
