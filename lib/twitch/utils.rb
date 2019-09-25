@@ -95,6 +95,29 @@ module Twitch
       vods_list
     end
 
+    def get_stream_data(broadcaster)
+      stream_data_url = generate_url(STREAM_DATA_URL, {
+        'params' => {
+          'broadcaster' => broadcaster
+        }
+      })
+
+      raw = api(stream_data_url, "Error: Could not get stream data")
+      parsed = JSON.parse(raw)
+
+      stream_data = parsed['stream']
+
+      raise "Error: Stream is not live" unless stream_data
+      channel_data = stream_data['channel']
+
+      puts """
+#{channel_data['display_name']} is live with #{channel_data["status"]}
+Current game: #{stream_data["game"]}
+Viewers: #{stream_data["viewers"]}
+
+"""
+    end
+
     def get_token(type, opts)
       token_base = nil
 
@@ -139,25 +162,27 @@ module Twitch
       "#{bandwidth} #{unit}/s"
     end
 
-    def always_skip_check(options)
-      if options['always']
-        # Only write if we are also supplied with the bitrate
-        # or resolution flag
-        config = read_config
+    def persist_persistent_options(options)
+      config = read_config
 
-        if options['resolution']
-          config["always"] = 'resolution'
-        elsif options['bitrate']
-          config["always"] = 'bitrate'
-        end
+      # Remove previous "always_skip" option if present
+      config.delete("always_skip")
 
-        # puts "Will always select stream with highest #{config['always']} in the future.\n\n"
-
-        # Remove previous "always_skip" option if present
-        config.delete("always_skip")
-
-        write_config! config
+      # Reset print_url config value if present and explicitly set to false
+      if config['print_url'] and options['print_url'] == false
+        config.delete('print_url')
+      elsif options['print_url']
+        config['print_url'] = true
       end
+
+      if options['always']
+        config['always'] = options['always']
+
+        # TODO: debug printing
+        # puts "Will always select stream with highest #{config['always']} in the future.\n\n"
+      end
+
+      write_config! config
     end
 
     def read_config
@@ -195,21 +220,15 @@ module Twitch
     end
 
     def validate_options(options)
-      # Make sure that the always flag has either bitrate or
-      # resolution flag given, but not both
-
       if options['always']
-        if options['bitrate'] and options['resolution']
-          abort "The --always flag allows either --bitrate or --resolution flag, but not both."
-        end
-
-        if !options['bitrate'] and !options['resolution']
-          abort "The --always flag requires either --bitrate or --resolution flag."
+        # Always takes precedence over resolution/bitrate selection, warn user
+        if options['resolution'] or options['bitrate']
+          return 'Warning: --always takes precedence over --bitrate or --resolution'
         end
       end
 
       if options['bitrate'] and options['resolution']
-        abort "The --bitrate and --resolution flags cannot be supplied together."
+        return "The --bitrate and --resolution flags cannot be supplied together."
       end
     end
 

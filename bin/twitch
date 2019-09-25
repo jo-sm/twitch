@@ -12,14 +12,42 @@ require_relative '../lib/twitch/utils.rb'
 
 options = {}
 
-OptionParser.new do |opt|
+opt_parser = OptionParser.new do |opt|
+  opt.banner = "Usage: twitch mode broadcaster [options]"
+
   opt.on('--limit LIMIT', Integer, 'API request video limit, default 30.') { |o| options['limit'] = o }
   opt.on('--player PLAYER_NAME', 'Video player, default QuickTime.') { |o| options['player'] = o }
   opt.on('--bitrate', 'Play video with highest bitrate.') { |o| options['bitrate'] = o }
   opt.on('--resolution', 'Play video with highest resolution.') { |o| options['resolution'] = o }
-  opt.on('--always', 'Always play highest bitrate/resolution available.') { |o| options['always'] = o }
+  opt.on('--always bitrate|resolution', ['bitrate', 'resolution'], 'Always play highest bitrate/resolution available.') { |o| options['always'] = o }
   opt.on('--reset', 'Resets your configuration. Preserves previously played broadcasters.') { |o| options['reset'] = o }
-end.parse!
+  opt.on('--print-url [yes|no]', 'Print the stream/video url when opening player. Saves choice in configuration. Defaults to true if provided.') { |o|
+    # the presence of this flag means it is true, unless it is explicitly "false"
+    if ['false', 'f', 'no'].include? o
+      options['print_url'] = false
+    elsif ['true', 't', 'yes'].include? o or o == nil
+      options['print_url'] = true
+    else
+      raise OptionParser::InvalidOption, ":: Only true/false style values, or nothing, are acceptable arguments."
+    end
+  }
+end
+
+# thanks to https://stackoverflow.com/questions/1541294/how-do-you-specify-a-required-switch-not-argument-with-ruby-optionparser
+begin
+  opt_parser.parse!
+
+  raise OptionParser::MissingArgument, "Mode is required" if !ARGV[0]
+  raise OptionParser::InvalidOption, "Mode must be live or vod" if !['live', 'vod'].include? ARGV[0]
+  options['mode'] = ARGV[0]
+
+  raise OptionParser::MissingArgument, "Broadcaster is required" if !ARGV[1]
+  options['broadcaster'] = ARGV[1].downcase
+rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::InvalidArgument => e
+  puts "Error: #{e}\n\n"
+  puts opt_parser
+  abort
+end
 
 options['limit'] or options['limit'] = 30
 options['player'] or options['player'] = 'QuickTime Player'
@@ -27,9 +55,7 @@ options['bitrate'] or options['bitrate'] = false
 options['resolution'] or options['resolution'] = false
 options['always'] or options['always'] = false
 options['reset'] or options['reset'] = false
-
-abort "Error: Please supply a mode. Usage: twitch {live,vod} BROADCASTER" if !ARGV[0]
-abort "Error: Please supply a broadcaster. Usage: twitch {live,vod} BROADCASTER" if !ARGV[1]
+[true, false].include? options['print_url'] or options['print_url'] = nil
 
 def get_stream_info(type, token, opts)
   raw = Twitch::Utils.api(url, "Error: Stream is not live")
@@ -40,31 +66,36 @@ def get_stream_info(type, token, opts)
 end
 
 def watch(source, options)
+  config = Twitch::Utils.read_config
   url = source['url']
   bitrate = Twitch::Utils.bandwidth_to_human(source['bandwidth'])
 
   puts "\nPlaying quality: #{source['video']} (#{source['resolution']}) @ #{bitrate}"
+
+  if options['print_url'] or config['print_url']
+    puts "\nStream URL: #{url}"
+  end
 
   # Attempt to open with the open command, since it may be a GUI program
   `open -a "#{options['player']}" "#{url}" 2>/dev/null`
 
   if $? != 0 and options['player'] != "QuickTime Player"
     # Attempt to run as a command line program
-    # This may affect how the process is seen by Activity Monitor (
-    # may be seen as a child of the bash process)
+    # This may affect how the process is seen by Activity Monitor
+    # (may be seen as a child of the bash process)
     pid=`#{options['player']} "#{url}" 2&>1 &`
 
     puts pid
 
     if $? != 0
-      puts "For some reason, the player couldn't be opened properly. Try running 'twitch' without the player argument."
+      puts "For some reason, the player didn't open correctly. Try running 'twitch' without the player argument or choose a different player."
     end
   end
 end
 
 def main(options)
-  mode = ARGV[0]
-  broadcaster = ARGV[1].downcase
+  mode = options['mode']
+  broadcaster = options['broadcaster']
 
   Twitch::Utils.rewrite_broadcasters_cache
   Twitch::Utils.validate_options options
@@ -73,7 +104,7 @@ def main(options)
     Twitch::Utils.reset_config
   end
 
-  Twitch::Utils.always_skip_check options
+  Twitch::Utils::persist_persistent_options options
 
   if mode != 'live' && mode != 'vod'
     abort "Error: Invalid mode supplied. Valid modes are: live, vod. Usage: twitch {live,vod} BROADCASTER"
@@ -123,6 +154,11 @@ def main(options)
 
   raw_m3u8 = Twitch::Utils.api(m3u8_url, "Error: Could not retrieve m3u8 playlist from API")
   parsed = Twitch::Utils.parse_m3u8(raw_m3u8)
+
+  if mode == 'live'
+    Twitch::Utils.get_stream_data(broadcaster)
+  end
+
   selected_stream = Twitch::Utils.ask_user_which_quality(parsed, options)
 
   Twitch::Utils.add_to_broadcasters_cache broadcaster

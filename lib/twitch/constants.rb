@@ -10,5 +10,7 @@ module Twitch
 
     TOKEN_URL_LIVE = "https://api.twitch.tv/api/channels/%{broadcaster}/access_token"
     TOKEN_URL_VOD = "https://api.twitch.tv/api/vods/%{video_id}/access_token"
+
+    STREAM_DATA_URL = "https://api.twitch.tv/kraken/streams/%{broadcaster}"
   end
 end
