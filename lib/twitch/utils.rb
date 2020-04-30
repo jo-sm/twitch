@@ -31,12 +31,7 @@ module Twitch
       end
 
       if options['url_params']
-        url_params = options['url_params']
-        url_params_string = url_params.reduce([]) { |memo, (k,v)| 
-          memo.push("#{k}=#{v}") 
-        }.join('&')
-
-        url = "#{url}?#{url_params_string}"
+        url = "#{url}?#{URI.encode_www_form(options['url_params'])}"
       end
 
       url
@@ -51,8 +46,8 @@ module Twitch
             'broadcaster' => opts['broadcaster']
           },
           'url_params' => {
-            'token' => URI.escape(token["token"]),
-            'sig' => URI.escape(token["sig"]),
+            'token' => token["token"],
+            'sig' => token["sig"],
             'allow_source' => true,
             'player_backend' => 'html5',
             'baking_bread' => true,
@@ -65,8 +60,8 @@ module Twitch
             'video_id' => opts['video_id']
           },
           'url_params' => {
-            'nauth' => URI.escape(token["token"]),
-            'nauthsig' => URI.escape(token["sig"]),
+            'nauth' => token["token"],
+            'nauthsig' => token["sig"],
             'allow_source' => true,
             'allow_spectre' => true,
             'p' => Random.rand(1000000..9999999),

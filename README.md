@@ -34,7 +34,26 @@ I generally use QuickTime Player, because it handles videos with more power effi
 
 ## Tab Completion
 
-If you'd like to enable tab completion for the keywords (vod, live) and the broadcasters you've previously watched, put the following in your `~/.bash_profile`:
+If you'd like to enable tab completion for the keywords (vod, live) and the broadcasters you've previously watched, you can add one of the following autocompletion scripts.
+
+### Zsh
+
+If you have Zsh completions setup, you can add the following completion as a file in your completions directory, most likely `~/.zcompletions`:
+
+```
+#compdef twitch
+typeset -A opt_args
+
+local streamers=( $(ruby -e "require 'json'; puts JSON.load(open(File.join(Dir.home, '.twitch', 'config'), 'r').read)[\"broadcasters\"].join ' '") )
+
+_arguments -C \
+  '1:cmd:(live vod)' \
+  '2:streamers:($streamers)'
+```
+
+### Bash
+
+Put the following in your `~/.bash_profile`:
 
 ```
 _twitch_tab_complete() {
