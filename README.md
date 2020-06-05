@@ -4,7 +4,7 @@ Twitch is a ruby gem that lets you watch Twitch streams and VODs on your Mac thr
 
 ## Installation
 
-You will need to download the source using git, build it into a gem, and install it manually:
+It is purposefully not available on rubygems.org. You will need to download the source using git, build it into a gem, and install it manually:
 
 ```
 > git clone https://github.com/jo-sm/twitch

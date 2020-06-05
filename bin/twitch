@@ -9,6 +9,9 @@ require 'time'
 require 'optparse'
 
 require_relative '../lib/twitch/utils.rb'
+require_relative '../lib/twitch/graphql.rb'
+
+include Twitch::Graphql
 
 options = {}
 
@@ -58,7 +61,7 @@ options['reset'] or options['reset'] = false
 [true, false].include? options['print_url'] or options['print_url'] = nil
 
 def get_stream_info(type, token, opts)
-  raw = Twitch::Utils.api(url, "Error: Stream is not live")
+  raw = Twitch::Utils.rest(url, "Error: Stream is not live")
 
   sources = Twitch::Utils.parse_m3u8 raw
 
@@ -120,20 +123,22 @@ def main(options)
       'resolution' => options['resolution']
     })
   elsif mode === 'vod'
-    vods_list = Twitch::Utils.get_vods_list(broadcaster, {
-      'limit' => options['limit']  
+    vods_list = broadcasts({
+      "broadcaster": broadcaster,
+      "limit": options["limit"]
     })
-    abort "Error: Broadcaster has no saved broadcasts" if vods_list["videos"].length == 0
 
-    vods_list["videos"].each_with_index do |video, i|
-      time = Time.parse(video["recorded_at"]).getlocal.strftime('%a %b %e %Y %l:%M%p')
-      puts "#{i+1}: (#{time}) #{video["title"]}"
+    abort "Error: Broadcaster has no saved broadcasts" if vods_list.length == 0
+
+    vods_list.each_with_index do |video, i|
+      time = Time.parse(video[:published_at]).getlocal.strftime('%a %b %e %Y %l:%M%p')
+      puts "#{i+1}: (#{time}) #{video[:title]}"
     end
 
     print "Please select the video you would like to watch: "
     index = $stdin.gets.strip.to_i
 
-    while !vods_list["videos"][index-1] or (index < 1)
+    while !vods_list[index-1] or (index < 1)
       puts "Error: Invalid selection"
       print "Please select the video you would like to watch: "
       index = $stdin.gets.strip.to_i
@@ -142,7 +147,7 @@ def main(options)
     # Put a newline for better spacing
     puts
 
-    video_id = vods_list["videos"][index-1]["_id"][1..-1]
+    video_id = vods_list[index-1][:id]
 
     token = Twitch::Utils.get_token('vod', { 'video_id' => video_id })
     m3u8_url = Twitch::Utils.m3u8_url('vod', token, {
@@ -152,7 +157,16 @@ def main(options)
     })
   end
 
-  raw_m3u8 = Twitch::Utils.api(m3u8_url, "Error: Could not retrieve m3u8 playlist from API")
+  begin
+    raw_m3u8 = Twitch::Utils.rest_no_rescue m3u8_url
+  rescue OpenURI::HTTPError => e
+    if e.io.status[0] == "404"
+      abort "#{broadcaster} is not live, could not retrieve stream details"
+    else
+      abort "Error: Could not retrieve m3u8 stream playlist #{e.io.status[0]}"
+    end
+  end
+
   parsed = Twitch::Utils.parse_m3u8(raw_m3u8)
 
   if mode == 'live'

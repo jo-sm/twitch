@@ -17,5 +17,5 @@ Gem::Specification.new do |spec|
   spec.executables   = [ 'twitch' ]
   spec.require_paths = [ "lib" ]
 
-  spec.add_development_dependency "bundler", "~> 1.12.a"
+  spec.add_development_dependency "bundler", "~> 2.1.0"
 end

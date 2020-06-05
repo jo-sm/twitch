@@ -2,21 +2,31 @@ require 'fileutils'
 require 'json'
 
 require_relative './constants.rb'
+require_relative './graphql.rb'
+
 
 module Twitch
   module Utils
     module_function
 
     include Twitch::Constants
+    include Twitch::Graphql
 
-    def api(raw_uri, error_msg)
-      client_id = CLIENT_ID
+    def rest_no_rescue(raw_uri)
+      uri = URI.parse(raw_uri)
 
+      uri.open({
+        'Client-ID' => CLIENT_ID
+      }).read
+    end
+
+
+    def rest(raw_uri, error_msg)
       uri = URI.parse(raw_uri)
 
       begin
         uri.open({
-          'Client-ID' => client_id
+          'Client-ID' => CLIENT_ID
         }).read
       rescue OpenURI::HTTPError => e
         abort "#{error_msg} (#{e})"
@@ -73,42 +83,15 @@ module Twitch
       url
     end
 
-    def get_vods_list(broadcaster, options)
-      vods_url = generate_url(VODS_API_URL, {
-        'params' => {
-          'broadcaster' => broadcaster
-        },
-        'url_params' => {
-          'broadcasts' => true,
-          'limit' => options['limit']
-        }
-      })
-
-      vods_raw = api(vods_url, "Error: Broadcaster does not exist")
-      vods_list = JSON.parse(vods_raw)
-
-      vods_list
-    end
-
     def get_stream_data(broadcaster)
-      stream_data_url = generate_url(STREAM_DATA_URL, {
-        'params' => {
-          'broadcaster' => broadcaster
-        }
-      })
+      stream_data = stream({ "broadcaster": broadcaster })
 
-      raw = api(stream_data_url, "Error: Could not get stream data")
-      parsed = JSON.parse(raw)
-
-      stream_data = parsed['stream']
-
-      raise "Error: Stream is not live" unless stream_data
-      channel_data = stream_data['channel']
+      raise "Error: #{broadcaster} is not live!" unless stream_data
 
       puts """
-#{channel_data['display_name']} is live with #{channel_data["status"]}
-Current game: #{stream_data["game"]}
-Viewers: #{stream_data["viewers"]}
+#{stream_data[:display_name]} is live with «#{stream_data[:title]}»
+Current game: #{stream_data[:current_game]}
+Viewers: #{stream_data[:viewers]}
 
 """
     end
@@ -135,7 +118,7 @@ Viewers: #{stream_data["viewers"]}
         }
       })
 
-      raw_token = api(token_url, "Error: Unable to retrieve token")
+      raw_token = rest(token_url, "Error: Unable to retrieve token")
       token = JSON.parse(raw_token)
 
       raise "Error: #{token["message"]}" if token["error"]
