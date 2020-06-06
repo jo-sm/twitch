@@ -1,37 +1,35 @@
 #!/usr/bin/env ruby
 
-require 'net/http'
-require 'uri'
-require 'json'
-require 'open-uri'
-require 'fileutils'
 require 'time'
 require 'optparse'
 
-require_relative '../lib/twitch/utils.rb'
-require_relative '../lib/twitch/graphql.rb'
+require 'twitch/config'
+require 'twitch/graphql'
+require 'twitch/rest'
 
+include Twitch::Config
+include Twitch::Rest
 include Twitch::Graphql
 
-options = {}
+@options = {}
 
 opt_parser = OptionParser.new do |opt|
   opt.banner = "Usage: twitch mode broadcaster [options]"
 
-  opt.on('--limit LIMIT', Integer, 'API request video limit, default 30.') { |o| options['limit'] = o }
-  opt.on('--player PLAYER_NAME', 'Video player, default QuickTime.') { |o| options['player'] = o }
-  opt.on('--bitrate', 'Play video with highest bitrate.') { |o| options['bitrate'] = o }
-  opt.on('--resolution', 'Play video with highest resolution.') { |o| options['resolution'] = o }
-  opt.on('--always bitrate|resolution', ['bitrate', 'resolution'], 'Always play highest bitrate/resolution available.') { |o| options['always'] = o }
-  opt.on('--reset', 'Resets your configuration. Preserves previously played broadcasters.') { |o| options['reset'] = o }
-  opt.on('--print-url [yes|no]', 'Print the stream/video url when opening player. Saves choice in configuration. Defaults to true if provided.') { |o|
+  opt.on('--limit LIMIT', Integer, 'API request video limit. Defaults to 30.') { |o| @options[:limit] = o }
+  opt.on('--player PLAYER_NAME', 'Video player. Defaults to QuickTime.') { |o| @options[:player] = o }
+  opt.on('--bitrate', 'Play video with highest bitrate.') { |o| @options[:bitrate] = o }
+  opt.on('--resolution', 'Play video with highest resolution.') { |o| @options[:resolution] = o }
+  opt.on('--always bitrate|resolution', ['bitrate', 'resolution'], 'Always play highest bitrate/resolution available.') { |o| @options[:always] = o }
+  opt.on('--reset', 'Resets your configuration. Preserves previously played broadcasters.') { |o| @options[:reset] = o }
+  opt.on('--print-url [yes|no]', 'Print the stream/video url when opening player. Persists in configuration, and defaults to yes if not provided/saved.') { |o|
     # the presence of this flag means it is true, unless it is explicitly "false"
     if ['false', 'f', 'no'].include? o
-      options['print_url'] = false
+      @options[:print_url] = false
     elsif ['true', 't', 'yes'].include? o or o == nil
-      options['print_url'] = true
+      @options[:print_url] = true
     else
-      raise OptionParser::InvalidOption, ":: Only true/false style values, or nothing, are acceptable arguments."
+      raise OptionParser::InvalidOption, ":: Only yes/no values, or nothing, is acceptable for --print-url"
     end
   }
 end
@@ -42,93 +40,142 @@ begin
 
   raise OptionParser::MissingArgument, "Mode is required" if !ARGV[0]
   raise OptionParser::InvalidOption, "Mode must be live or vod" if !['live', 'vod'].include? ARGV[0]
-  options['mode'] = ARGV[0]
+
+  @options[:mode] = ARGV[0]
 
   raise OptionParser::MissingArgument, "Broadcaster is required" if !ARGV[1]
-  options['broadcaster'] = ARGV[1].downcase
+  @options[:broadcaster] = ARGV[1].downcase
 rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::InvalidArgument => e
   puts "Error: #{e}\n\n"
   puts opt_parser
-  abort
+  exit
 end
 
-options['limit'] or options['limit'] = 30
-options['player'] or options['player'] = 'QuickTime Player'
-options['bitrate'] or options['bitrate'] = false
-options['resolution'] or options['resolution'] = false
-options['always'] or options['always'] = false
-options['reset'] or options['reset'] = false
-[true, false].include? options['print_url'] or options['print_url'] = nil
+@options[:limit] or @options[:limit] = 30
+@options[:player] or @options[:player] = 'QuickTime Player'
+@options[:bitrate] or @options[:bitrate] = false
+@options[:resolution] or @options[:resolution] = false
+@options[:always] or @options[:always] = false
+@options[:reset] or @options[:reset] = false
+[true, false].include? @options[:print_url] or @options[:print_url] = nil
 
-def get_stream_info(type, token, opts)
-  raw = Twitch::Utils.rest(url, "Error: Stream is not live")
+def display_stream_details(broadcaster)
+  stream_data = request_stream_data({ "broadcaster": broadcaster })
 
-  sources = Twitch::Utils.parse_m3u8 raw
+  raise "Error: #{broadcaster} is not live!" unless stream_data
 
-  Twitch::Utils.determine_quality sources, opts
+  puts """
+#{stream_data[:display_name]} is live with «#{stream_data[:title]}»
+Current game: #{stream_data[:current_game]}
+Viewers: #{stream_data[:viewers]}
+"""
 end
 
-def watch(source, options)
-  config = Twitch::Utils.read_config
-  url = source['url']
-  bitrate = Twitch::Utils.bandwidth_to_human(source['bandwidth'])
+def figure_out_which_source(sources)
+  config = read_config
 
-  puts "\nPlaying quality: #{source['video']} (#{source['resolution']}) @ #{bitrate}"
+  if config[:always]
+    autoplay = config[:always]
+  elsif @options[:bitrate]
+    autoplay = 'bitrate'
+  elsif @options[:resolution]
+    autoplay = 'resolution'
+  end
 
-  if options['print_url'] or config['print_url']
-    puts "\nStream URL: #{url}"
+  if autoplay
+    if autoplay == 'resolution'
+      # puts "Automatically selecting stream with highest resolution...\n"
+      source = sources.max_by { |source| source[:true_resolution] }
+    elsif autoplay == 'bitrate'
+      # puts "Automatically selecting stream with highest bitrate...\n"
+      source = sources.max_by { |source| source[:bandwidth] }
+    end
+  else
+    puts "\nAvailable qualities:"
+
+    sources.each_with_index do |source, i|
+      puts "#{i+1}: #{source[:resolution]} (#{bandwidth_to_human(source[:bandwidth])})"
+    end
+
+    print "Select quality: "
+    index = $stdin.gets.strip.to_i
+
+    while !sources[index-1] or (index < 1)
+      puts "Error: Invalid selection"
+      print "Select quality: "
+      index = $stdin.gets.strip.to_i
+    end
+
+    source = sources[index-1]
+  end
+
+  source
+end
+
+
+def watch(source)
+  config = read_config
+
+  puts "\nPlaying quality: #{source[:video]} (#{source[:resolution]}) @ #{source[:bitrate]}"
+
+  if @options[:print_url] or config[:print_url]
+    puts "\nStream URL: #{source[:url]}"
   end
 
   # Attempt to open with the open command, since it may be a GUI program
-  `open -a "#{options['player']}" "#{url}" 2>/dev/null`
+  `open -a "#{@options[:player]}" "#{source[:url]}" 2>/dev/null`
 
-  if $? != 0 and options['player'] != "QuickTime Player"
+  if $? != 0 and @options[:player] != "QuickTime Player"
     # Attempt to run as a command line program
     # This may affect how the process is seen by Activity Monitor
     # (may be seen as a child of the bash process)
-    pid=`#{options['player']} "#{url}" 2&>1 &`
+    pid=`#{@options[:player]} "#{source[:url]}" 2&>1 &`
 
     puts pid
 
     if $? != 0
-      puts "For some reason, the player didn't open correctly. Try running 'twitch' without the player argument or choose a different player."
+      puts "For some reason, player #{@options[:player]} didn't open correctly. Try running 'twitch' without the player argument or choose a different player."
     end
   end
 end
 
-def main(options)
-  mode = options['mode']
-  broadcaster = options['broadcaster']
+def main
+  mode = @options[:mode]
+  broadcaster = @options[:broadcaster]
 
-  Twitch::Utils.rewrite_broadcasters_cache
-  Twitch::Utils.validate_options options
+  validate_options @options
 
-  if options['reset']
-    Twitch::Utils.reset_config
+  if @options[:reset]
+    reset_config
   end
 
-  Twitch::Utils::persist_persistent_options options
-
-  if mode != 'live' && mode != 'vod'
-    abort "Error: Invalid mode supplied. Valid modes are: live, vod. Usage: twitch {live,vod} BROADCASTER"
-  end
-
-  error_msg = nil
+  persist_persistent_options @options
 
   if mode == 'live'
-    token = Twitch::Utils.get_token('live', { 'broadcaster' => broadcaster })
-    m3u8_url = Twitch::Utils.m3u8_url('live', token, {
-      'broadcaster' => broadcaster,
-      'bitrate' => options['bitrate'],
-      'resolution' => options['resolution']
-    })
+    token = request_token('live', { 'broadcaster': broadcaster })
+
+    begin
+      m3u8 = request_m3u8('live', token, {
+        'broadcaster': broadcaster,
+        'bitrate': @options[:bitrate],
+        'resolution': @options[:resolution]
+      })
+    rescue OpenURI::HTTPError => e
+      if e.io.status[0] == "404"
+        abort "#{broadcaster} is not live, could not retrieve stream details"
+      else
+        abort "Error: Could not retrieve m3u8 stream playlist (#{e.io.status[0]})"
+      end
+    end
+
+    display_stream_details broadcaster
   elsif mode === 'vod'
-    vods_list = broadcasts({
+    vods_list = request_broadcasts({
       "broadcaster": broadcaster,
-      "limit": options["limit"]
+      "limit": @options[:limit]
     })
 
-    abort "Error: Broadcaster has no saved broadcasts" if vods_list.length == 0
+    abort "Error: #{broadcaster} has no saved previous VODs" if vods_list.length == 0
 
     vods_list.each_with_index do |video, i|
       time = Time.parse(video[:published_at]).getlocal.strftime('%a %b %e %Y %l:%M%p')
@@ -144,44 +191,28 @@ def main(options)
       index = $stdin.gets.strip.to_i
     end
 
-    # Put a newline for better spacing
-    puts
-
     video_id = vods_list[index-1][:id]
 
-    token = Twitch::Utils.get_token('vod', { 'video_id' => video_id })
-    m3u8_url = Twitch::Utils.m3u8_url('vod', token, {
-      'video_id' => video_id,
-      'bitrate' => options['bitrate'],
-      'resolution' => options['resolution']
+    token = request_token('vod', { 'video_id': video_id })
+
+    # Because we have the video ID from above, this shouldn't fail normally. If it does, just let
+    # it throw
+    m3u8 = request_m3u8('vod', token, {
+      'video_id': video_id,
+      'bitrate': @options[:bitrate],
+      'resolution': @options[:resolution]
     })
   end
 
-  begin
-    raw_m3u8 = Twitch::Utils.rest_no_rescue m3u8_url
-  rescue OpenURI::HTTPError => e
-    if e.io.status[0] == "404"
-      abort "#{broadcaster} is not live, could not retrieve stream details"
-    else
-      abort "Error: Could not retrieve m3u8 stream playlist #{e.io.status[0]}"
-    end
-  end
+  add_to_broadcasters_cache broadcaster
 
-  parsed = Twitch::Utils.parse_m3u8(raw_m3u8)
+  selected_stream = figure_out_which_source m3u8
 
-  if mode == 'live'
-    Twitch::Utils.get_stream_data(broadcaster)
-  end
-
-  selected_stream = Twitch::Utils.ask_user_which_quality(parsed, options)
-
-  Twitch::Utils.add_to_broadcasters_cache broadcaster
-
-  watch selected_stream, options
+  watch selected_stream
 end
 
 begin
-  main(options)
+  main
 rescue SystemExit, Interrupt
   puts ""
   exit

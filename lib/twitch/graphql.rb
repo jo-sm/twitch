@@ -1,14 +1,14 @@
 require 'net/https'
 require 'json'
 
-require_relative './constants.rb'
+require 'twitch/constants'
 
 module Twitch
   module Graphql
     include Twitch::Constants
 
-    def broadcasts(options)
-      result = send_request({
+    def request_broadcasts(options)
+      result = make_gql_request({
           "operationName": "FilterableVideoTower_Videos",
           "variables": {
               "limit": options[:limit],
@@ -37,8 +37,8 @@ module Twitch
       end
     end
 
-    def stream(options)
-      result = send_request({
+    def request_stream_data(options)
+      result = make_gql_request({
           "operationName": "ChannelRoot_Channel",
           "variables": {
               "currentChannelLogin": options[:broadcaster],
@@ -66,7 +66,7 @@ module Twitch
 
     private
 
-    def send_request(query)
+    def make_gql_request(query)
       uri = URI.parse(GRAPHQL_API_URL)
 
       https = Net::HTTP.new(uri.host, 443)
@@ -80,6 +80,7 @@ module Twitch
 
       resp = https.request(req)
 
+      # Assume `query` above only contains one object
       JSON.parse(resp.body)[0]
     end
   end
