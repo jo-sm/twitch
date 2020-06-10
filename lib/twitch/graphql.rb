@@ -55,6 +55,13 @@ module Twitch
       display_name = result["data"]["user"]["displayName"]
       stream_details = result["data"]["user"]["stream"]
 
+      # In `bin/twitch`, we don't call this method until we have already requested
+      # the m3u8, and so in theory the streamer should be live by this point and should
+      # have stream details. However, there seems to be some cases when the streamer
+      # has an m3u8 but no stream details, so we return if it is nil to prevent errors
+      # below
+      return unless stream_details
+
       {
         "id": stream_details["id"],
         "title": stream_details["title"],

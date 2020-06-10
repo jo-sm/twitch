@@ -62,13 +62,20 @@ end
 def display_stream_details(broadcaster)
   stream_data = request_stream_data({ "broadcaster": broadcaster })
 
-  raise "Error: #{broadcaster} is not live!" unless stream_data
-
-  puts """
+  if not stream_data
+    # The m3u8 is available, but there aren't any details, so just show that the stream is live
+    # with nothing else
+    puts """
+#{broadcaster} is live
+"""
+  else
+    puts """
 #{stream_data[:display_name]} is live with «#{stream_data[:title]}»
 Current game: #{stream_data[:current_game]}
 Viewers: #{stream_data[:viewers]}
 """
+  end
+
 end
 
 def figure_out_which_source(sources)
