@@ -2,6 +2,7 @@ require 'net/https'
 require 'json'
 
 require 'twitch/constants'
+require 'twitch/error'
 
 module Twitch
   module Graphql
@@ -23,6 +24,8 @@ module Twitch
               }
           }
       })
+
+      raise Twitch::Error.new(result["errors"][0]["message"]) if result["errors"]
 
       videos_meta = result["data"]["user"]["videos"]["edges"]
 
@@ -51,6 +54,8 @@ module Twitch
               }
           }
       })
+
+      raise Twitch::Error.new(result["errors"][0]["message"]) if result["errors"]
 
       display_name = result["data"]["user"]["displayName"]
       stream_details = result["data"]["user"]["stream"]

@@ -6,6 +6,7 @@ require 'optparse'
 require 'twitch/config'
 require 'twitch/graphql'
 require 'twitch/rest'
+require 'twitch/error'
 
 include Twitch::Config
 include Twitch::Rest
@@ -60,7 +61,12 @@ end
 [true, false].include? @options[:print_url] or @options[:print_url] = nil
 
 def display_stream_details(broadcaster)
-  stream_data = request_stream_data({ "broadcaster": broadcaster })
+  begin
+    stream_data = request_stream_data({ "broadcaster": broadcaster })
+  rescue Twitch::Error => e
+    # This is a GraphQL error, and we don't really care about it here, since
+    # the stream details are tertiary
+  end
 
   if not stream_data
     # The m3u8 is available, but there aren't any details, so just show that the stream is live
@@ -75,7 +81,6 @@ Current game: #{stream_data[:current_game]}
 Viewers: #{stream_data[:viewers]}
 """
   end
-
 end
 
 def figure_out_which_source(sources)
@@ -159,28 +164,34 @@ def main
   persist_persistent_options @options
 
   if mode == 'live'
-    token = request_token('live', { 'broadcaster': broadcaster })
-
     begin
+      token = request_token('live', { 'broadcaster': broadcaster })
+
       m3u8 = request_m3u8('live', token, {
         'broadcaster': broadcaster,
         'bitrate': @options[:bitrate],
         'resolution': @options[:resolution]
       })
+    rescue Twitch::Error => e
+      abort "Error: Could not retrieve stream details (message: #{e.message})"
     rescue OpenURI::HTTPError => e
       if e.io.status[0] == "404"
         abort "#{broadcaster} is not live, could not retrieve stream details"
       else
-        abort "Error: Could not retrieve m3u8 stream playlist (#{e.io.status[0]})"
+        abort "Error: Could not retrieve m3u8 stream playlist (status: #{e.io.status[0]})"
       end
     end
 
     display_stream_details broadcaster
   elsif mode === 'vod'
-    vods_list = request_broadcasts({
-      "broadcaster": broadcaster,
-      "limit": @options[:limit]
-    })
+    begin
+      vods_list = request_broadcasts({
+        "broadcaster": broadcaster,
+        "limit": @options[:limit]
+      })
+    rescue Twitch::Error => e
+      abort "Error: Could not retrieve VODs (#{e.message})"
+    end
 
     abort "Error: #{broadcaster} has no saved previous VODs" if vods_list.length == 0
 
