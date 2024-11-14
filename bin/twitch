@@ -165,7 +165,7 @@ def main
 
   if mode == 'live'
     begin
-      token = request_token('live', { 'broadcaster': broadcaster })
+      token = request_live_access_token({ 'broadcaster': broadcaster})
 
       m3u8 = request_m3u8('live', token, {
         'broadcaster': broadcaster,
@@ -211,7 +211,7 @@ def main
 
     video_id = vods_list[index-1][:id]
 
-    token = request_token('vod', { 'video_id': video_id })
+    token = request_vod_access_token({ 'broadcaster': broadcaster, 'video_id': video_id })
 
     # Because we have the video ID from above, this shouldn't fail normally. If it does, just let
     # it throw

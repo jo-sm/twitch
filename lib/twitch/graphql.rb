@@ -8,10 +8,47 @@ module Twitch
   module Graphql
     include Twitch::Constants
 
+    def request_live_access_token(options)
+      result = make_gql_request({
+        "operationName": "PlaybackAccessToken_Template",
+        "query": "query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) {  streamPlaybackAccessToken(channelName: $login, params: {platform: \"web\", playerBackend: \"mediaplayer\", playerType: $playerType}) @include(if: $isLive) {    value    signature    __typename  }  videoPlaybackAccessToken(id: $vodID, params: {platform: \"web\", playerBackend: \"mediaplayer\", playerType: $playerType}) @include(if: $isVod) {    value    signature    __typename  }}",
+        "variables": {
+          "isLive": true,
+          "login": options[:broadcaster],
+          "isVod": false,
+          "vodID": "",
+          "playerType": "site"
+        }
+      })
+
+      raise Twitch::Error.new(result["errors"][0]["message"]) if result["errors"]
+
+      result["data"]["streamPlaybackAccessToken"]
+    end
+
+    def request_vod_access_token(options)
+      result = make_gql_request({
+        "operationName": "PlaybackAccessToken_Template",
+        "query": "query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) {  streamPlaybackAccessToken(channelName: $login, params: {platform: \"web\", playerBackend: \"mediaplayer\", playerType: $playerType}) @include(if: $isLive) {    value    signature    __typename  }  videoPlaybackAccessToken(id: $vodID, params: {platform: \"web\", playerBackend: \"mediaplayer\", playerType: $playerType}) @include(if: $isVod) {    value    signature    __typename  }}",
+        "variables": {
+          "isLive": false,
+          "login": "",
+          "isVod": true,
+          "vodID": options[:video_id],
+          "playerType": "site"
+        }
+      })
+
+      raise Twitch::Error.new(result["errors"][0]["message"]) if result["errors"]
+
+      result["data"]["videoPlaybackAccessToken"]
+    end
+
     def request_broadcasts(options)
       result = make_gql_request({
           "operationName": "FilterableVideoTower_Videos",
           "variables": {
+              "includePreviewBlur": false,
               "limit": options[:limit],
               "channelOwnerLogin": options[:broadcaster],
               "broadcastType": "ARCHIVE",
@@ -20,12 +57,14 @@ module Twitch
           "extensions": {
               "persistedQuery": {
                   "version": 1,
-                  "sha256Hash": "a937f1d22e269e39a03b509f65a7490f9fc247d7f83d6ac1421523e3b68042cb"
+                  "sha256Hash": "08eed732ca804e536f9262c6ce87e0e15f07d6d3c047e8e5d7a461afd5a66a00"
               }
           }
       })
 
+      raise Twitch::Error.new("Could not get result") if not result
       raise Twitch::Error.new(result["errors"][0]["message"]) if result["errors"]
+      raise Twitch::Error.new("Streamer %s not found" % options[:broadcaster]) if not result["data"]["user"]
 
       videos_meta = result["data"]["user"]["videos"]["edges"]
 
@@ -70,7 +109,7 @@ module Twitch
       {
         "id": stream_details["id"],
         "title": stream_details["title"],
-        "current_game": stream_details["game"]["displayName"],
+        "current_game": stream_details.dig("game", "displayName"),
         "viewers": stream_details["viewersCount"],
         "display_name": display_name
       }
@@ -91,6 +130,10 @@ module Twitch
       req['Client-Id'] = CLIENT_ID
 
       resp = https.request(req)
+
+      if resp.code != '200'
+        raise Twitch::Error.new("Unexpected status code %s: %s" % [resp.code, resp.message])
+      end
 
       # Assume `query` above only contains one object
       JSON.parse(resp.body)[0]

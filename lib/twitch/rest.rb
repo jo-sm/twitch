@@ -1,5 +1,6 @@
 require 'json'
 require 'open-uri'
+require 'net/http'
 
 require 'twitch/constants'
 require 'twitch/utils'
@@ -41,12 +42,19 @@ module Twitch
             'broadcaster': options[:broadcaster]
           },
           'url_params': {
-            'token': token[:token],
-            'sig': token[:sig],
+            'acmb': 'e30=',
             'allow_source': true,
-            'player_backend': 'html5',
-            'baking_bread': true,
+            'fast_bread': true,
             'p': Random.rand(1000000..9999999),
+            'player_backend': 'mediaplayer',
+            'playlist_include_framerate': true,
+            'reassignments_supported': true,
+            'sig': token["signature"],
+            'token': token["value"],
+
+            'supported_codecs': 'avc1',
+            'cdm': 'fp',
+            'player_version': '1.16.0'
           }
         })
       elsif type == 'vod'
@@ -55,12 +63,17 @@ module Twitch
             'video_id': options[:video_id]
           },
           'url_params': {
-            'nauth': token[:token],
-            'nauthsig': token[:sig],
+            'acmb': 'e30=',
             'allow_source': true,
-            'allow_spectre': true,
             'p': Random.rand(1000000..9999999),
-            'baking_bread': true
+            'player_backend': 'mediaplayer',
+            'playlist_include_framerate': true,
+            'reassignments_supported': true,
+            'sig': token["signature"],
+            'supported_codecs': 'avc1',
+            'token': token["value"],
+            'cdm': 'fp',
+            'player_version': '1.16.0'
           }
         })
       end
@@ -72,11 +85,22 @@ module Twitch
 
     private
 
+    def get_integrity_token
+      uri = URI.parse(INTEGRITY_API_URL)
+
+      resp = Net::HTTP.post uri, "", 'Client-ID' => CLIENT_ID
+
+      JSON.parse(resp.read_body)["token"]
+    end
+
     def make_api_request(raw_uri)
       uri = URI.parse(raw_uri)
 
+      integrity_token = get_integrity_token()
+
       uri.open({
-        'Client-ID' => CLIENT_ID
+        'Client-ID' => CLIENT_ID,
+        'Client-Integrity' => integrity_token,
       }).read
     end
 
