@@ -2,6 +2,8 @@
 
 Twitch is a ruby gem that lets you watch Twitch streams and VODs on your Mac through Quicktime. 
 
+⚠️ I won't be updating this any further. I'm not using this library myself very much anymore, and it doesn't seem to be working as-is: running a `twitch vod ...` command presents an error. It probably will work with a little modification, so if you use this or want to get it to work, feel free to fork. The queries in `lib/twitch/graphql.rb` are likely the main place you need to look, plus some potential error handling changes.⚠️
+
 ## Installation
 
 It is purposefully not available on rubygems.org. You will need to download the source using git, build it into a gem, and install it manually:
@@ -84,7 +86,7 @@ complete -F _twitch_tab_complete twitch
 
 ## Notes
 
-This gem uses private APIs and may break at any time. I do use the gem regularly and do update it, but if something is broken, please be patient. The main reason that I wrote this was that before Twitch switched to HLS streaming, it used a very resource intensive Flash player, but allowed HLS streaming for specific platforms like the iOS app. All of the web players use HLS by default now, but I still prefer to watch in a different window rather than in the browser.
+This gem uses private APIs and may break at any time. The main reason that I wrote this was that before Twitch switched to HLS streaming, it used a very resource intensive Flash player, but allowed HLS streaming for specific platforms like the iOS app. All of the web players use HLS by default now, but I still prefer to watch in a different window rather than in the browser.
 
 If you use this gem, consider subscribing or donating to the streamer as this bypasses the Twitch player and the ads that are delivered with it. Show them some financial support!
 
